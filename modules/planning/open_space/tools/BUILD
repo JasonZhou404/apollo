@@ -15,6 +15,19 @@ cc_binary(
 )
 
 cc_binary(
+    name = "iterative_anchoring_wrapper_lib.so",
+    srcs = [
+        "iterative_anchoring_wrapper.cc",
+    ],
+    linkshared = True,
+    linkstatic = False,
+    deps = [
+        "//modules/planning/open_space/coarse_trajectory_generator:hybrid_a_star",
+        "//modules/planning/open_space/trajectory_smoother:iterative_anchoring_smoother",
+    ],
+)
+
+cc_binary(
     name = "distance_approach_problem_wrapper_lib.so",
     srcs = [
         "distance_approach_problem_wrapper.cc",
