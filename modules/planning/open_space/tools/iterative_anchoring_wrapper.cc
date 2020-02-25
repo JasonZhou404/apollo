@@ -102,7 +102,9 @@ class IAResultContainer {
   DiscretizedTrajectory* PrepareIterativeAnchoringResult() {
     return &iterative_anchoring_result_;
   }
-  double* get_iterative_anchoring_time() { return &iterative_anchoring_time_; }
+  double* get_iterative_total_time() { return &iterative_total_time_; }
+  double* get_path_smooth_time() { return &path_smooth_time_; }
+  double* get_speed_opt_time() { return &speed_opt_time_; }
 
  private:
   std::vector<double> hybrid_a_x_;
@@ -121,7 +123,9 @@ class IAResultContainer {
   std::vector<double> iterative_achoring_a_;
   std::vector<double> iterative_achoring_kappa_;
   DiscretizedTrajectory iterative_anchoring_result_;
-  double iterative_anchoring_time_;
+  double iterative_total_time_;
+  double path_smooth_time_;
+  double speed_opt_time_;
 };
 
 extern "C" {
@@ -195,10 +199,12 @@ bool IterativeAnchoringSmoothing(
     IterativeAnchoringSmoother* IterativeAnchoring_ptr,
     const Eigen::MatrixXd& xWS, const double init_a, const double init_v,
     const std::vector<std::vector<common::math::Vec2d>>& obstacles_vertices_vec,
-    DiscretizedTrajectory* smoothed_trajectory, double* epoch_time) {
+    DiscretizedTrajectory* smoothed_trajectory, double* epoch_time,
+    double* path_smooth_time, double* speed_opt_time) {
   const auto start_timestamp = std::chrono::system_clock::now();
-  if (!IterativeAnchoring_ptr->Smooth(
-          xWS, init_a, init_v, obstacles_vertices_vec, smoothed_trajectory)) {
+  if (!IterativeAnchoring_ptr->TmpSmooth(
+          xWS, init_a, init_v, obstacles_vertices_vec, smoothed_trajectory,
+          path_smooth_time, speed_opt_time)) {
     return false;
   }
   const auto end_timestamp = std::chrono::system_clock::now();
@@ -241,18 +247,24 @@ bool IterativeAnchoringPlan(HybridAStar* hybridA_ptr,
   xWS_vec.resize(size);
   uWS_vec.resize(size);
 
-  double iterative_anchoring_time = 0.0;
+  double total_time = 0.0;
+  double path_time = 0.0;
+  double speed_time = 0.0;
   for (size_t i = 0; i < size; ++i) {
     LoadHybridAstarResultInEigen(&partition_trajectories[i], &xWS_vec[i],
                                  &uWS_vec[i]);
     double epoch_time = 0.0;
-    if (!IterativeAnchoringSmoothing(IterativeAnchoring_ptr, xWS_vec[i], 0.0,
-                                     0.0,
-                                     obstacles_ptr->GetObstaclesVerticesVec(),
-                                     &traj_vec[i], &epoch_time)) {
+    double path_smooth_time = 0.0;
+    double speed_opt_time = 0.0;
+    if (!IterativeAnchoringSmoothing(
+            IterativeAnchoring_ptr, xWS_vec[i], 0.0, 0.0,
+            obstacles_ptr->GetObstaclesVerticesVec(), &traj_vec[i], &epoch_time,
+            &path_smooth_time, &speed_opt_time)) {
       return false;
     }
-    iterative_anchoring_time += epoch_time;
+    total_time += epoch_time;
+    path_time += path_smooth_time;
+    speed_time += speed_opt_time;
   }
 
   // combine trajectories
@@ -262,8 +274,9 @@ bool IterativeAnchoringPlan(HybridAStar* hybridA_ptr,
   *(result_ptr->PrepareHybridAResult()) = hybrid_astar_result;
   *(result_ptr->PrepareIterativeAnchoringResult()) = combined_traj;
   *(result_ptr->get_hybrid_a_time()) = hybrid_a_time;
-  *(result_ptr->get_iterative_anchoring_time()) = iterative_anchoring_time;
-
+  *(result_ptr->get_iterative_total_time()) = total_time;
+  *(result_ptr->get_path_smooth_time()) = path_time;
+  *(result_ptr->get_speed_opt_time()) = speed_time;
   return true;
 }
 
@@ -272,7 +285,8 @@ void IAGetResult(IAResultContainer* result_ptr, double* x, double* y,
                  double* opt_x, double* opt_y, double* opt_phi, double* opt_v,
                  double* opt_a, double* opt_kappa, size_t* hybrid_a_output_size,
                  size_t* iterative_anchoring_output_size, double* hybrid_a_time,
-                 double* iterative_anchoring_time) {
+                 double* iterative_total_time, double* path_time,
+                 double* speed_time) {
   result_ptr->LoadResult();
   size_t size_by_hybrid_astar = result_ptr->get_hybrid_a_x()->size();
   size_t size_by_iterative_anchoring =
@@ -303,7 +317,9 @@ void IAGetResult(IAResultContainer* result_ptr, double* x, double* y,
   }
 
   hybrid_a_time[0] = *(result_ptr->get_hybrid_a_time());
-  iterative_anchoring_time[0] = *(result_ptr->get_iterative_anchoring_time());
+  iterative_total_time[0] = *(result_ptr->get_iterative_total_time());
+  path_time[0] = *(result_ptr->get_path_smooth_time());
+  speed_time[0] = *(result_ptr->get_speed_opt_time());
 }
 };
 

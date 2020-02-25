@@ -39,7 +39,7 @@ lib.IAGetResult.argtypes = [c_void_p, POINTER(c_double), POINTER(c_double), POIN
                     POINTER(c_double), POINTER(c_double), POINTER(c_double), POINTER(c_double), 
                     POINTER(c_double), POINTER(c_double), POINTER(c_double), POINTER(c_double), 
                     POINTER(c_double), POINTER(c_ushort), POINTER(c_ushort), POINTER(c_double), 
-                    POINTER(c_double)]
+                    POINTER(c_double), POINTER(c_double), POINTER(c_double)]
 
 class IterativeAnchoringPlanner(object):
     def __init__(self):
@@ -57,10 +57,11 @@ class IterativeAnchoringPlanner(object):
                         c_double(sy), c_double(sphi), c_double(ex), c_double(ey), c_double(ephi), POINTER(c_double)(XYbounds))
     
     def IAGetResult(self, x, y, phi, v, a, kappa, opt_x, opt_y, opt_phi, opt_v, opt_a, opt_kappa, hybrid_a_output_size, \
-        iterative_anchoring_output_size, hybrid_a_time, iterative_anchoring_time):
+        iterative_anchoring_output_size, hybrid_a_time, iterative_total_time, path_time, speed_time):
         lib.IAGetResult(self.result, POINTER(c_double)(x), POINTER(c_double)(y), \
                       POINTER(c_double)(phi), POINTER(c_double)(v), POINTER(c_double)(a), POINTER(c_double)(kappa), \
                       POINTER(c_double)(opt_x), POINTER(c_double)(opt_y), \
                       POINTER(c_double)(opt_phi), POINTER(c_double)(opt_v), POINTER(c_double)(opt_a), POINTER(c_double)(opt_kappa), \
                       POINTER(c_ushort)(hybrid_a_output_size), POINTER(c_ushort)(iterative_anchoring_output_size), \
-                      POINTER(c_double)(hybrid_a_time), POINTER(c_double)(iterative_anchoring_time))
+                      POINTER(c_double)(hybrid_a_time), POINTER(c_double)(iterative_total_time), POINTER(c_double)(path_time), \
+                      POINTER(c_double)(speed_time))

@@ -43,6 +43,12 @@ class IterativeAnchoringSmoother {
 
   ~IterativeAnchoringSmoother() = default;
 
+  bool TmpSmooth(const Eigen::MatrixXd& xWS, const double init_a,
+                 const double init_v,
+                 const std::vector<std::vector<common::math::Vec2d>>&
+                     obstacles_vertices_vec,
+                 DiscretizedTrajectory* discretized_trajectory,
+                 double* path_smooth_time, double* speed_opt_time);
   bool Smooth(const Eigen::MatrixXd& xWS, const double init_a,
               const double init_v,
               const std::vector<std::vector<common::math::Vec2d>>&

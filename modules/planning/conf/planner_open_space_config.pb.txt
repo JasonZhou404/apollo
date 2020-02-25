@@ -4,17 +4,17 @@ roi_config {
   parking_inwards: false
 }
 warm_start_config {
-  xy_grid_resolution: 0.3
+  xy_grid_resolution: 0.1
   phi_grid_resolution: 0.1
-  next_node_num: 10
-  step_size: 0.5
+  next_node_num: 4
+  step_size: 0.2
   traj_forward_penalty: 1.0
   traj_back_penalty: 1.0
-  traj_gear_switch_penalty: 10.0
+  traj_gear_switch_penalty: 1.0
   traj_steer_penalty: 0.0
   traj_steer_change_penalty: 0.0
-  grid_a_star_xy_resolution: 0.5
-  node_radius: 0.25
+  grid_a_star_xy_resolution: 0.1
+  node_radius: 0.1
   s_curve_config {
     acc_weight: 1.0
     jerk_weight: 0.0
@@ -112,11 +112,11 @@ iterative_anchoring_smoother_config {
   default_bound: 2.0
   vehicle_shortest_dimension: 1.04
   fem_pos_deviation_smoother_config {
-     weight_fem_pos_deviation: 1e8
-     weight_path_length: 1.0
-     weight_ref_deviation: 1e3
-     apply_curvature_constraint: false
-     weight_curvature_constraint_slack_var: 1e8
+     weight_fem_pos_deviation: 1.0e8
+     weight_path_length: 0.0
+     weight_ref_deviation: 0.0
+     apply_curvature_constraint: true
+     weight_curvature_constraint_slack_var: 1e12
      curvature_constraint: 0.2
      max_iter: 500
      time_limit: 0.0
@@ -126,16 +126,16 @@ iterative_anchoring_smoother_config {
   }
   collision_decrease_ratio: 0.9
   max_forward_v: 2.0
-  max_reverse_v: 2.0
-  max_forward_acc: 3.0
+  max_reverse_v: 1.0
+  max_forward_acc: 2.0
   max_reverse_acc: 2.0
-  max_acc_jerk: 4.0
-  delta_t: 0.2
+  max_acc_jerk: 1.0
+  delta_t: 0.05
   s_curve_config {
-    acc_weight: 1.0
-    jerk_weight: 1.0
-    dkappa_penalty_weight: 100.0
-    ref_s_weight: 10.0
+    acc_weight: 10.0
+    jerk_weight: 100.0
+    dkappa_penalty_weight: 10.0
+    ref_s_weight: 100.0
     ref_v_weight: 0.0
   }
 }

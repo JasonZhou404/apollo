@@ -52,6 +52,165 @@ IterativeAnchoringSmoother::IterativeAnchoringSmoother(
   planner_open_space_config_ = planner_open_space_config;
 }
 
+bool IterativeAnchoringSmoother::TmpSmooth(
+    const Eigen::MatrixXd& xWS, const double init_a, const double init_v,
+    const std::vector<std::vector<Vec2d>>& obstacles_vertices_vec,
+    DiscretizedTrajectory* discretized_trajectory, double* path_smooth_time,
+    double* speed_opt_time) {
+  if (xWS.cols() < 2) {
+    AERROR << "reference points size smaller than two, smoother early "
+              "returned";
+    return false;
+  }
+  const auto start_timestamp = std::chrono::system_clock::now();
+
+  // Set gear of the trajectory
+  gear_ = CheckGear(xWS);
+
+  // Set obstacle in form of linesegments
+  std::vector<std::vector<LineSegment2d>> obstacles_linesegments_vec;
+  for (const auto& obstacle_vertices : obstacles_vertices_vec) {
+    size_t vertices_num = obstacle_vertices.size();
+    std::vector<LineSegment2d> obstacle_linesegments;
+    for (size_t i = 0; i + 1 < vertices_num; ++i) {
+      LineSegment2d line_segment =
+          LineSegment2d(obstacle_vertices[i], obstacle_vertices[i + 1]);
+      obstacle_linesegments.emplace_back(line_segment);
+    }
+    obstacles_linesegments_vec.emplace_back(obstacle_linesegments);
+  }
+  obstacles_linesegments_vec_ = std::move(obstacles_linesegments_vec);
+
+  // Interpolate the traj
+  DiscretizedPath warm_start_path;
+  size_t xWS_size = xWS.cols();
+  double accumulated_s = 0.0;
+  Vec2d last_path_point(xWS(0, 0), xWS(1, 0));
+  for (size_t i = 0; i < xWS_size; ++i) {
+    Vec2d cur_path_point(xWS(0, i), xWS(1, i));
+    accumulated_s += cur_path_point.DistanceTo(last_path_point);
+    PathPoint path_point;
+    path_point.set_x(xWS(0, i));
+    path_point.set_y(xWS(1, i));
+    path_point.set_theta(xWS(2, i));
+    path_point.set_s(accumulated_s);
+    warm_start_path.push_back(std::move(path_point));
+    last_path_point = cur_path_point;
+  }
+
+  const double interpolated_delta_s =
+      planner_open_space_config_.iterative_anchoring_smoother_config()
+          .interpolated_delta_s();
+  std::vector<std::pair<double, double>> interpolated_warm_start_point2ds;
+  double path_length = warm_start_path.Length();
+  double delta_s = path_length / std::ceil(path_length / interpolated_delta_s);
+  path_length += delta_s * 1.0e-6;
+  for (double s = 0; s < path_length; s += delta_s) {
+    const auto point2d = warm_start_path.Evaluate(s);
+    interpolated_warm_start_point2ds.emplace_back(point2d.x(), point2d.y());
+  }
+
+  const size_t interpolated_size = interpolated_warm_start_point2ds.size();
+  if (interpolated_size < 4) {
+    AERROR << "interpolated_warm_start_path smaller than 4, can't enforce "
+              "heading continuity";
+    return false;
+  } else if (interpolated_size < 6) {
+    ADEBUG << "interpolated_warm_start_path smaller than 4, can't enforce "
+              "initial zero kappa";
+    enforce_initial_kappa_ = false;
+  } else {
+    enforce_initial_kappa_ = true;
+  }
+
+  // Adjust heading to ensure heading continuity
+  AdjustStartEndHeading(xWS, &interpolated_warm_start_point2ds);
+
+  // Reset path profile by discrete point heading and curvature estimation
+  DiscretizedPath interpolated_warm_start_path;
+  if (!SetPathProfile(interpolated_warm_start_point2ds,
+                      &interpolated_warm_start_path)) {
+    AERROR << "Set path profile fails";
+    return false;
+  }
+
+  // Generate feasible bounds for each path point
+  std::vector<double> bounds;
+  if (!GenerateInitialBounds(interpolated_warm_start_path, &bounds)) {
+    AERROR << "Generate initial bounds failed, path point to close to obstacle";
+    return false;
+  }
+
+  // Check initial path collision avoidance, if it fails, smoother assumption
+  // fails. Try reanchoring
+  input_colliding_point_index_.clear();
+  if (!CheckCollisionAvoidance(interpolated_warm_start_path,
+                               &input_colliding_point_index_)) {
+    AERROR << "Interpolated input path points colliding with obstacle";
+    // if (!ReAnchoring(colliding_point_index, &interpolated_warm_start_path)) {
+    //   AERROR << "Fail to reanchor colliding input path points";
+    //   return false;
+    // }
+  }
+
+  const auto path_smooth_start_timestamp = std::chrono::system_clock::now();
+
+  // Smooth path to have smoothed x, y, phi, kappa and s
+  DiscretizedPath smoothed_path_points;
+  if (!SmoothPath(interpolated_warm_start_path, bounds,
+                  &smoothed_path_points)) {
+    return false;
+  }
+
+  const auto path_smooth_end_timestamp = std::chrono::system_clock::now();
+  std::chrono::duration<double> path_smooth_diff =
+      path_smooth_end_timestamp - path_smooth_start_timestamp;
+  ADEBUG << "iterative anchoring path smoother time: "
+         << path_smooth_diff.count() * 1000.0 << " ms.";
+
+  *path_smooth_time = path_smooth_diff.count() * 1000.0;
+
+  const auto speed_smooth_start_timestamp = std::chrono::system_clock::now();
+
+  // Smooth speed to have smoothed v and a
+  SpeedData smoothed_speeds;
+  if (!SmoothSpeed(init_a, init_v, smoothed_path_points.Length(),
+                   &smoothed_speeds)) {
+    return false;
+  }
+
+  // TODO(Jinyun): Evaluate performance
+  // SpeedData smoothed_speeds;
+  // if (!GenerateStopProfileFromPolynomial(
+  //         init_a, init_v, smoothed_path_points.Length(), &smoothed_speeds)) {
+  //   return false;
+  // }
+
+  const auto speed_smooth_end_timestamp = std::chrono::system_clock::now();
+  std::chrono::duration<double> speed_smooth_diff =
+      speed_smooth_end_timestamp - speed_smooth_start_timestamp;
+  ADEBUG << "iterative anchoring speed smoother time: "
+         << speed_smooth_diff.count() * 1000.0 << " ms.";
+
+  *speed_opt_time = speed_smooth_diff.count() * 1000.0;
+
+  // Combine path and speed
+  if (!CombinePathAndSpeed(smoothed_path_points, smoothed_speeds,
+                           discretized_trajectory)) {
+    return false;
+  }
+
+  AdjustPathAndSpeedByGear(discretized_trajectory);
+
+  const auto end_timestamp = std::chrono::system_clock::now();
+  std::chrono::duration<double> diff = end_timestamp - start_timestamp;
+  ADEBUG << "iterative anchoring smoother total time: " << diff.count() * 1000.0
+         << " ms.";
+
+  ADEBUG << "discretized_trajectory size " << discretized_trajectory->size();
+  return true;
+}
+
 bool IterativeAnchoringSmoother::Smooth(
     const Eigen::MatrixXd& xWS, const double init_a, const double init_v,
     const std::vector<std::vector<Vec2d>>& obstacles_vertices_vec,
@@ -624,7 +783,14 @@ bool IterativeAnchoringSmoother::SmoothSpeed(const double init_a,
       planner_open_space_config_.iterative_anchoring_smoother_config()
           .delta_t();
 
-  const double total_t = 2 * path_length / max_reverse_acc * 10;
+  const double total_t = std::max(gear_
+                                      ? 1.5 * (max_forward_v * max_forward_v +
+                                               path_length * max_forward_acc) /
+                                            (max_forward_acc * max_forward_v)
+                                      : 1.5 * (max_reverse_v * max_reverse_v +
+                                               path_length * max_reverse_acc) /
+                                            (max_reverse_acc * max_reverse_v),
+                                  10.0);
   ADEBUG << "total_t is : " << total_t;
   const size_t num_of_knots = static_cast<size_t>(total_t / delta_t) + 1;
 
@@ -675,7 +841,7 @@ bool IterativeAnchoringSmoother::SmoothSpeed(const double init_a,
   // Assign speed point by gear
   smoothed_speeds->AppendSpeedPoint(s[0], 0.0, ds[0], dds[0], 0.0);
   const double kEpislon = 1.0e-4;
-  const double sEpislon = 1.0e-1;
+  const double sEpislon = 1.0e-5;
   for (size_t i = 1; i < num_of_knots; ++i) {
     if (s[i - 1] - s[i] > kEpislon) {
       AERROR << "unexpected decreasing s in speed smoothing at time "
@@ -700,7 +866,7 @@ bool IterativeAnchoringSmoother::CombinePathAndSpeed(
   CHECK_NOTNULL(discretized_trajectory);
   discretized_trajectory->clear();
   // TODO(Jinyun): move to confs
-  const double kDenseTimeResoltuion = 0.1;
+  const double kDenseTimeResoltuion = 0.05;
   const double time_horizon =
       speed_points.TotalTime() + kDenseTimeResoltuion * 1.0e-6;
   if (path_points.empty()) {
