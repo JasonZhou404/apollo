@@ -50,6 +50,10 @@ bool BirdviewImgFeatureRenderer::Init(const PlanningSemanticMapConfig& config) {
   if (map_name != "sunnyvale_with_two_offices" && map_name != "sunnyvale") {
     AERROR << "Map other than sunnyvale_with_two_offices are not supported";
   }
+
+  AINFO << FLAGS_map_dir;
+  AINFO << map_name;
+
   // TODO(Jinyun): add sunnyvale map or draw basemap online
   if (map_name == "sunnyvale") {
     AWARN << "use sunnyvale_with_two_offices for sunnyvale for now";
